@@ -80,11 +80,16 @@ def stop_instances():
 def snapshot_instances():
     "Create snapshots for Ec2 instances"
 
-
     for i in ec2.instances.all():
+        i.stop()
+        i.wait_until_stopped()
         for v in i.volumes.all():
             print("Starting {0}...".format(i.id))
             v.create_snapshot("Created by Snapshotalyzer")
+        print("Starting {0}".format(i.id))
+        i.start()
+        i.wait_until_running()
+    print("Job Done...!")
     return
 
 if __name__ == '__main__':
