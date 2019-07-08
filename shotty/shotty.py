@@ -5,6 +5,10 @@ import botocore
 session = boto3.Session(profile_name='shotty')
 ec2 = session.resource('ec2')
 
+def has_pending_snapshot(volume):
+    snapshots = list(volume.snapshots.all())
+    return snapshots and snapshots[0].state == 'pending'
+
 @click.group()
 def cli():
     """shotty manages snapshots"""
@@ -31,7 +35,9 @@ def snapshots():
     """Command for snapshots"""
 
 @snapshots.command('list')
-def list_snapshots():
+@click.option('--all', 'list_all', default=False, is_flag=True,
+    help="List all snapshots for each volume not just the most recent.")
+def list_snapshots(list_all):
     """List Snapshots"""
     for i in ec2.instances.all():
         for v in i.volumes.all():
@@ -43,6 +49,8 @@ def list_snapshots():
                     s.state,
                     s.progress,
                     s.start_time.strftime("%c"))))
+
+                if s.state == 'completed' and not list_all: break
     return
 
 @cli.group('instances')
@@ -94,7 +102,10 @@ def snapshot_instances():
         i.stop()
         i.wait_until_stopped()
         for v in i.volumes.all():
-            print("Starting {0}...".format(i.id))
+            if has_pending_snapshot(v):
+                print("Skipping {0}, snapshot already in progress",format(v.id))
+                continue
+            print("Creating snapshot of {0}...".format(i.id))
             v.create_snapshot("Created by Snapshotalyzer")
         print("Starting {0}".format(i.id))
         i.start()
