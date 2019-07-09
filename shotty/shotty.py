@@ -1,13 +1,29 @@
 import boto3
 import click
 import botocore
+import sys
 
 session = boto3.Session(profile_name='shotty')
 ec2 = session.resource('ec2')
 
+def filter_instances(project):
+    instances=[]
+    if project:
+        filters=[{'Name':'tag:Project','Values':[project]}]
+        instances = ec2.instances.filter(Filters=filters)
+    else:
+        instances = ec2.instances.all()
+    return instances
+
+def filter_single_instance(instance):
+    instances=[]
+    instances = ec2.instances.filter(InstanceIds=[instance])
+    return instances
+
 def has_pending_snapshot(volume):
     snapshots = list(volume.snapshots.all())
     return snapshots and snapshots[0].state == 'pending'
+
 
 @click.group()
 def cli():
@@ -18,9 +34,17 @@ def volumes():
     """Commands for volumes"""
 
 @volumes.command('list')
-def list_volumes():
+@click.option('--project', default=None,
+    help="Only instances for project (tag Project:<name>)")
+@click.option('--instance', default=None,
+    help="Only instances with spacific id ")
+def list_volumes(instance,project):
     """List Volumes"""
-    for i in ec2.instances.all():
+    if instance:
+        instances= filter_single_instance(instance)
+    else:
+        instances = filter_instances(project)
+    for i in instances:
         for v in i.volumes.all():
             print(', '.join((
             v.id,
@@ -39,7 +63,8 @@ def snapshots():
     help="List all snapshots for each volume not just the most recent.")
 def list_snapshots(list_all):
     """List Snapshots"""
-    for i in ec2.instances.all():
+    instances = filter_instances(project)
+    for i in instances:
         for v in i.volumes.all():
             for s in v.snapshots.all():
                 print(', '.join((
@@ -58,9 +83,12 @@ def instances():
     """Commands for instances"""
 
 @instances.command('list')
-def list_instances():
+@click.option('--project', default=None,
+    help="Only instances for project (tag Project:<name>)")
+def list_instances(project):
     "List EC2 instances"
-    for i in ec2.instances.all():
+    instances = filter_instances(project)
+    for i in instances:
         print(', '.join((
             i.id,
             i.instance_type,
@@ -70,9 +98,22 @@ def list_instances():
     return
 
 @instances.command('stop')
-def stop_instances():
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Forces running of command if project tag is not set.")
+@click.option('--project', default=None,
+    help="Only instances for project (tag Project:<name>)")
+@click.option('--instance', default=None,
+    help="Only instances with spacific id ")
+def stop_instances(instance,project,force):
     "Stop Ec2 instances"
-    for i in ec2.instances.all():
+    if instance:
+        instances= filter_single_instance(instance)
+    elif project or force:
+        instances = filter_instances(project)
+    else:
+        raise SystemExit("Instance, Project and Force flags are not set.")
+
+    for i in instances:
         print("Stopping {0}...".format(i.id))
         try:
             i.stop()
@@ -82,9 +123,23 @@ def stop_instances():
     return
 
 @instances.command('start')
-def stop_instances():
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Forces running of command if project tag is not set.")
+@click.option('--project', default=None,
+    help="Only instances for project (tag Project:<name>)")
+@click.option('--instance', default=None,
+    help="Only instances with spacific id ")
+def stop_instances(instance,project,force):
     "Start Ec2 instances"
-    for i in ec2.instances.all():
+
+    if instance:
+        instances= filter_single_instance(instance)
+    elif project or force:
+        instances = filter_instances(project)
+    else:
+        raise SystemExit("Project and Force flags are not set.")
+
+    for i in instances:
         print("Starting {0}...".format(i.id))
         try:
             i.start()
@@ -95,10 +150,19 @@ def stop_instances():
 
 
 @instances.command('snapshot')
-def snapshot_instances():
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Forces running of command if project tag is not set.")
+@click.option('--project', default=None,
+    help="Only instances for project (tag Project:<name>)")
+def snapshot_instances(project,force):
     "Create snapshots for Ec2 instances"
 
-    for i in ec2.instances.all():
+    if project or force:
+        instances = filter_instances(project)
+    else:
+        raise SystemExit("Project and Force flags are not set.")
+
+    for i in instances:
         i.stop()
         i.wait_until_stopped()
         for v in i.volumes.all():
@@ -113,6 +177,35 @@ def snapshot_instances():
     print("Job Done...!")
     return
 
-if __name__ == '__main__':
+@instances.command('reboot')
+@click.option('--force', 'force', default=False, is_flag=True,
+    help="Forces running of command if project tag is not set.")
+@click.option('--project', default=None,
+    help="Only instances for project (tag Project:<name>)")
+def reboot_instances(project,force):
+    "Reboot Ec2 instances"
 
+    if project or force:
+        instances = filter_instances(project)
+    else:
+        raise SystemExit("Project and Force flags are not set.")
+
+    for i in instances:
+        i.wait_until_running()
+        print("Rebooting {0}...".format(i.id))
+        i.reboot()
+    return
+
+@instances.command('tag')
+def tag_instances():
+    "Tag Ec2 instances"
+
+    instances = filter_instances(project)
+    for i in instances:
+        i.create_tags(Tags=[{'Key':'Project', 'Value':'niloo-python'}])
+        print("Tagging {0}...".format(i.id))
+    return
+
+
+if __name__ == '__main__':
     cli()
